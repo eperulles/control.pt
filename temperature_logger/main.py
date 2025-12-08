@@ -9,11 +9,8 @@ import os
 from PIL import Image
 from datetime import datetime
 
-try:
-    from pyzbar.pyzbar import decode
-except ImportError:
-    decode = None
-    print("Warning: pyzbar not installed or failed to load. Scanner will not work.")
+# Removed top-level import to prevent startup crash on Android
+decode = None
 
 def main(page: ft.Page):
     print("Iniciando aplicación Flet...")
@@ -189,6 +186,16 @@ def main(page: ft.Page):
         """Helper to decode image from path"""
         try:
             img = Image.open(img_path)
+            
+            # Late import to avoid startup crash on Android if dependencies missing
+            global decode
+            try:
+                if decode is None:
+                    from pyzbar.pyzbar import decode
+            except Exception as e:
+                print(f"Failed to import pyzbar: {e}")
+                decode = None
+            
             if decode:
                 decoded_objects = decode(img)
                 if decoded_objects:
