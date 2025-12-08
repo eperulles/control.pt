@@ -1,0 +1,9 @@
+# Ignore everything
+*
+# Unignore specific directories and files
+!*/
+!temperature_logger/
+!temperature_logger/**
+!.github/
+!.github/**
+!.gitignore

@@ -1,0 +1,4 @@
+flet
+pyserial
+pillow
+pyzbar
