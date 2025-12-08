@@ -19,9 +19,15 @@ def main(page: ft.Page):
     page.window_width = 800
     page.window_height = 600
 
-    # Dependencies
-    wifi_svc = WifiService(mock=True) 
-    db_mgr = DataManager()
+    # Dependencies - WiFi service will be initialized on-demand to prevent Android startup crash
+    wifi_svc = None  # Created when measurement starts
+    
+    # Database can be initialized safely
+    try:
+        db_mgr = DataManager()
+    except Exception as e:
+        print(f"Failed to initialize DataManager: {e}")
+        db_mgr = None
     
     # State Variables
     selected_line = ft.Ref[ft.Dropdown]()
@@ -277,6 +283,18 @@ def main(page: ft.Page):
         page.update()
 
         def background_task():
+            nonlocal wifi_svc
+            
+            # Initialize WiFi service on-demand (lazy loading to prevent Android startup crash)
+            if wifi_svc is None:
+                try:
+                    wifi_svc = WifiService(mock=True)
+                except Exception as e:
+                    status_text.current.value = f"Error: No se pudo inicializar WiFi: {e}"
+                    btn_start.current.disabled = False
+                    page.update()
+                    return
+            
             # 0. Connect
             wifi_svc.update_ip(ip_address.current.value)
             if "192." in ip_address.current.value or "10." in ip_address.current.value or "172." in ip_address.current.value:
@@ -446,7 +464,8 @@ def main(page: ft.Page):
 
     def on_window_event(e):
         if e.data == "close":
-            wifi_svc.disconnect()
+            if wifi_svc:  # Only disconnect if initialized
+                wifi_svc.disconnect()
             page.window_destroy()
 
     page.window_prevent_close = True
