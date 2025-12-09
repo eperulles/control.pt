@@ -1,13 +1,44 @@
 import flet as ft
-from wifi_service import WifiService
-from data_manager import DataManager
-import time
-import threading
-import socket
-import io
 import os
-from PIL import Image
-from datetime import datetime
+
+# Safe imports with fallbacks
+try:
+    from wifi_service import WifiService
+except Exception as e:
+    print(f"WiFi service not available: {e}")
+    WifiService = None
+
+try:
+    from data_manager import DataManager
+except Exception as e:
+    print(f"DataManager not available: {e}")
+    DataManager = None
+
+try:
+    import time
+    import threading
+except Exception as e:
+    print(f"Threading not available: {e}")
+    time = None
+    threading = None
+
+try:
+    import socket
+except Exception as e:
+    print(f"Socket not available: {e}")
+    socket = None
+
+try:
+    from PIL import Image
+except Exception as e:
+    print(f"PIL not available: {e}")
+    Image = None
+
+try:
+    from datetime import datetime
+except Exception as e:
+    print(f"datetime not available: {e}")
+    datetime = None
 
 # Removed top-level import to prevent startup crash on Android
 decode = None
@@ -23,11 +54,12 @@ def main(page: ft.Page):
     wifi_svc = None  # Created when measurement starts
     
     # Database can be initialized safely
-    try:
-        db_mgr = DataManager()
-    except Exception as e:
-        print(f"Failed to initialize DataManager: {e}")
-        db_mgr = None
+    db_mgr = None
+    if DataManager:
+        try:
+            db_mgr = DataManager()
+        except Exception as e:
+            print(f"Failed to initialize DataManager: {e}")
     
     # State Variables
     selected_line = ft.Ref[ft.Dropdown]()
