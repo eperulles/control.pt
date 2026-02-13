@@ -1,78 +1,69 @@
 import socket
-import threading
 import time
-import random
-import re
-
-class MockWifi:
-    """Simulates a TCP connection for testing."""
-    def __init__(self, ip, port, timeout=1):
-        self.is_open = True
-        self.ip = ip
-        self.port = port
-        self.buffer = []
-        self._simulate_data()
-
-    def _simulate_data(self):
-        """Generates fake temperature data in a background thread."""
-        def run():
-            while self.is_open:
-                # Format: Raw: 26.50 °C	Corr: 26.30 °C	CJ: 27.00 °C	Fault: 0
-                # Adding some random fluctuation
-                base_temp = 350.0 # soldering iron temp approx
-                variation = random.uniform(-1, 1)
-                temp = base_temp + variation
-                raw = temp + 0.5
-                line = f"Raw: {raw:.2f} °C\tCorr: {temp:.2f} °C\tCJ: 27.00 °C\tFault: 0\r\n"
-                self.buffer.append(line.encode('utf-8'))
-                time.sleep(0.7) # Arduino delay is 700ms
-        
-        t = threading.Thread(target=run, daemon=True)
-        t.start()
-
-    def recv(self, bufsize):
-        if self.buffer:
-            return self.buffer.pop(0)
-        time.sleep(0.1)
-        return b""
-
-    def close(self):
-        self.is_open = False
 
 class WifiService:
-    def __init__(self, ip="192.168.1.100", port=8080, mock=False):
+    def __init__(self, ip="192.168.1.15", port=8080):
         self.ip = ip
-        self.port = int(port)
-        self.mock = mock
+        self.port = port
         self.sock = None
-        self.is_running = False
-        self.latest_temp = None # Latest valid temperature
-        self.collecting = False
-        self.collected_temps = []
-        self.thread = None
+
+    def update_ip(self, new_ip):
+        self.ip = new_ip
 
     def connect(self):
         try:
-            if self.mock:
-                print(f"Connecting to MOCK WiFi {self.ip}:{self.port}...")
-                self.sock = MockWifi(self.ip, self.port)
-            else:
-                print(f"Connecting to real WiFi {self.ip}:{self.port}...")
-                self.sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-                self.sock.settimeout(2)
-                self.sock.connect((self.ip, self.port))
-            
-            self.is_running = True
-            self.thread = threading.Thread(target=self._read_loop, daemon=True)
-            self.thread.start()
+            print(f"Connecting to {self.ip}:{self.port}...")
+            self.sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+            self.sock.settimeout(5)
+            self.sock.connect((self.ip, self.port))
+            print("Connected!")
             return True
         except Exception as e:
-            print(f"Error connecting to WiFi: {e}")
+            print(f"Connection failed: {e}")
             self.sock = None
             return False
 
+    def start_measurement(self):
+        # The ESP32 sends data continuously once connected, 
+        # but we can flush the buffer to ensure fresh data
+        pass
+
+    def get_latest_temp(self):
+        if not self.sock:
+            return None
+        try:
+            data = self.sock.recv(1024).decode('utf-8').strip()
+            if data:
+                # The ESP sends strings like "25.50"
+                # If multiple arrive "25.50\r\n25.51", take the last one
+                lines = data.split('\n')
+                last_line = lines[-1].strip()
+                return float(last_line)
+        except Exception as e:
+            print(f"Read error: {e}")
+            return None
+        return None
+
+    def stop_measurement(self):
+        # Determine average or just return last read
+        # For this simple implementation, we just disconnect.
+        # But main.py logic expects an average.
+        # We'll rely on get_latest_temp loop in main.py to calculate average there 
+        # OR main.py expects this method to return the final average?
+        # Checking main.py:
+        # avg = wifi_svc.stop_measurement() ? No, main.py calculates avg?
+        # Let's check main.py logic in a second.
+        # For now, let's implement a simple average tracker inside here if needed.
+        # Actually, main.py loop:
+        # for i in range(steps): ... val = wifi_svc.get_latest_temp() ...
+        # final = wifi_svc.stop_measurement()
+        # So stop_measurement SHOULD return the final value (or average).
+        
+        # Let's act smart: We will capture the last valid temp in get_latest_temp
+        pass
+        return 0.0 # Placeholder, main.py seems to use the returned value as FINAL.
+
     def disconnect(self):
-        self.is_running = False
         if self.sock:
             try:
                 self.sock.close()
@@ -80,87 +71,68 @@ class WifiService:
                 pass
             self.sock = None
 
-    def update_ip(self, ip):
+# Refined Logic to match main.py expectations
+# main.py expects get_latest_temp() to return a float to update UI
+# and stop_measurement() to return the FINAL average.
+
+class WifiService:
+    def __init__(self, ip, port=8080):
         self.ip = ip
+        self.port = port
+        self.sock = None
+        self.readings = []
 
-    def _read_loop(self):
-        while self.is_running and self.sock:
-            try:
-                # Basic line reading from socket
-                # Note: This is a simplified reader. In production networks, 
-                # you'd want a proper buffer handling for partial packets.
-                # For this specific ESP32 firmware that sends \r\n, this usually works "okay" 
-                # if packets arrive complete or we buffer slightly.
-                # Let's use a small buffer and accumulate.
-                
-                # However, for simplicity and since we control the sender (ESP32 `client.println`), 
-                # a small buffer read loop mimicking readline is safest.
-                line_str = self._socket_readline()
-                if line_str:
-                     self._parse_line(line_str)
-            except Exception as e:
-                # print(f"Read error: {e}") # Verbose
-                time.sleep(1)
+    def update_ip(self, new_ip):
+        self.ip = new_ip
 
-    def _socket_readline(self):
-        """Helper to read a line from socket."""
-        line = b''
-        while self.is_running and self.sock:
-            try:
-                if self.mock:
-                    chunk = self.sock.recv(1024)
-                    if not chunk: return None
-                    return chunk.decode('utf-8').strip()
-                else:
-                    self.sock.settimeout(1.0)
-                    chunk = self.sock.recv(1)
-                    if not chunk:
-                         return None
-                    line += chunk
-                    if line.endswith(b'\n'):
-                        return line.decode('utf-8').strip()
-            except socket.timeout:
-                continue
-            except Exception:
-                return None
-        return None
-
-    def _parse_line(self, line):
-        # Format 1 (Old): Raw: 26.50 °C	Corr: 26.30 °C	CJ: 27.00 °C	Fault: 0
-        # Format 2 (New): 26.30
-        
-        if not line: return
-        
-        # Try simple float first (New format)
+    def connect(self):
+        self.readings = []
         try:
-            temp = float(line.strip())
-            self.latest_temp = temp
-            if self.collecting:
-                self.collected_temps.append(temp)
-            return
-        except ValueError:
-            pass
-            
-        # Try Regex (Old format)
-        match = re.search(r"Corr:\s*([0-9\.]+)", line)
-        if match:
-            try:
-                temp = float(match.group(1))
-                self.latest_temp = temp
-                if self.collecting:
-                    self.collected_temps.append(temp)
-            except ValueError:
-                pass
+            self.sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+            self.sock.settimeout(3)
+            self.sock.connect((self.ip, int(self.port)))
+            return True
+        except Exception as e:
+            print(f"WifiService Connect Error: {e}")
+            return False
 
     def start_measurement(self):
-        self.collected_temps = []
-        self.collecting = True
-
-    def stop_measurement(self):
-        self.collecting = False
-        if not self.collected_temps:
-            return 0.0
-        return sum(self.collected_temps) / len(self.collected_temps)
+        self.readings = []
 
     def get_latest_temp(self):
-        return self.latest_temp
+        if not self.sock: return None
+        try:
+            # Non-blocking read or short timeout
+            self.sock.settimeout(1.0) 
+            data = self.sock.recv(256)
+            if not data: return None
+            
+            text = data.decode(errors='ignore').strip()
+            # Handle piled up data "23.5\r\n23.6"
+            lines = text.split()
+            if not lines: return None
+            
+            # Take last valid float
+            val = None
+            for l in reversed(lines):
+                try:
+                    val = float(l)
+                    self.readings.append(val)
+                    break
+                except:
+                    continue
+            return val
+        except:
+            return None
+
+    def stop_measurement(self):
+        # Calculate Average
+        if not self.readings:
+            return 0.0
+        avg = sum(self.readings) / len(self.readings)
+        return avg
+
+    def disconnect(self):
+        if self.sock:
+            self.sock.close()
+            self.sock = None

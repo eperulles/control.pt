@@ -20,9 +20,9 @@ WebServer httpServer(80);
 
 Adafruit_MAX31856 sensor = Adafruit_MAX31856(MAX_CS);
 
-// Calibración (LEGACY / 3 PUNTOS)
-const float GAIN = 2.430492135971587;
-const float OFFSET = -120.7828513444948;
+// Coeficientes Recalculados (Ajuste Final 7 puntos - Incluye 27C)
+const float GAIN = 0.788203658308612;
+const float OFFSET = 52.63188250923105;
 
 void setup() {
   Serial.begin(115200);

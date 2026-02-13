@@ -4,7 +4,9 @@ import os
 
 class DataManager:
     def __init__(self, db_name="temperature_logs.db"):
-        self.db_name = db_name
+        # Force Absolute Path
+        base_dir = os.path.dirname(os.path.abspath(__file__))
+        self.db_name = os.path.join(base_dir, db_name)
         self.init_db()
 
     def init_db(self):
@@ -92,3 +94,18 @@ class DataManager:
         
         conn.close()
         return sources, handles
+
+    def execute_query(self, query, params=()):
+        """Execute a raw query and return results (for READ) or commit (for WRITE)."""
+        conn = sqlite3.connect(self.db_name)
+        cursor = conn.cursor()
+        cursor.execute(query, params)
+        
+        if query.strip().upper().startswith("SELECT"):
+            rows = cursor.fetchall()
+            conn.close()
+            return rows
+        else:
+            conn.commit()
+            conn.close()
+            return None
