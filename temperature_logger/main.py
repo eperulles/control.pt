@@ -125,6 +125,7 @@ def main(page: ft.Page):
         min_y=0,
         max_y=500,
         expand=True,
+        bottom_axis=ft.ChartAxis(), # Initialize empty axis to prevent AttributeError
     )
     
     def refresh_dashboard_filters():
@@ -222,22 +223,30 @@ def main(page: ft.Page):
 
     def process_image(img_path):
         """Helper to decode image from path"""
+        print(f"DEBUG: Processing image at: {img_path}")
         try:
             img = Image.open(img_path)
+            print(f"DEBUG: Image opened successfully. Size: {img.size}")
             
             # Late import to avoid startup crash on Android if dependencies missing
             global decode
             try:
                 if decode is None:
+                    print("DEBUG: Importing pyzbar...")
                     from pyzbar.pyzbar import decode
+                    print("DEBUG: pyzbar imported successfully")
             except Exception as e:
                 print(f"Failed to import pyzbar: {e}")
                 decode = None
             
             if decode:
+                print("DEBUG: Attempting to decode...")
                 decoded_objects = decode(img)
+                print(f"DEBUG: Decode result: {decoded_objects}")
+                
                 if decoded_objects:
                     code = decoded_objects[0].data.decode("utf-8")
+                    print(f"DEBUG: Code found: {code}")
                     
                     if scan_target == "source":
                         code_source.current.value = code
@@ -249,11 +258,14 @@ def main(page: ft.Page):
                     page.snack_bar = ft.SnackBar(ft.Text(f"Código detectado: {code}"), open=True)
                 else:
                     img.close()
+                    print("DEBUG: No code found in image")
                     page.snack_bar = ft.SnackBar(ft.Text("No se detectó código en la imagen"), open=True)
             else:
                  img.close()
+                 print("DEBUG: Decode function is None")
                  page.snack_bar = ft.SnackBar(ft.Text("Librería de escaneo no disponible"), open=True)
         except Exception as ex:
+             print(f"DEBUG: Error in process_image: {ex}")
              page.snack_bar = ft.SnackBar(ft.Text(f"Error procesando imagen: {ex}"), open=True)
         finally:
             # CLEANUP: Delete the file immediately as user requested
@@ -356,15 +368,28 @@ def main(page: ft.Page):
             wifi_svc.start_measurement()
             duration = 10
             steps = 20 
+            
+            # Get Calibration values safely
+            try:
+                gain = float(tf_gain.current.value)
+                offset = float(tf_offset.current.value)
+            except:
+                gain = 1.0
+                offset = 0.0
+
             for i in range(steps):
                 time.sleep(duration / steps)
                 progress_bar.current.value = (i + 1) / steps
                 curr = wifi_svc.get_latest_temp()
                 if curr is not None:
-                    current_temp_display.current.value = f"Temp Actual: {curr:.2f} °C"
+                    # Apply Correction
+                    corrected_curr = (curr * gain) + offset
+                    current_temp_display.current.value = f"Temp Actual: {corrected_curr:.2f} °C"
                 page.update()
             
-            avg_temp = wifi_svc.stop_measurement()
+            avg_raw = wifi_svc.stop_measurement()
+            avg_corrected = (avg_raw * gain) + offset
+            
             wifi_svc.disconnect() 
             
             # 3. Save
@@ -372,11 +397,11 @@ def main(page: ft.Page):
                 selected_line.current.value,
                 code_source.current.value,
                 code_handle.current.value,
-                avg_temp
+                avg_corrected
             )
 
             # 4. Result
-            status_text.current.value = f"Completado. Promedio: {avg_temp:.2f} °C"
+            status_text.current.value = f"Completado. Promedio: {avg_corrected:.2f} °C"
             current_temp_display.current.value = f"Temp Actual: --"
             progress_bar.current.visible = False
             btn_start.current.disabled = False
@@ -479,6 +504,29 @@ def main(page: ft.Page):
         ])
     )
 
+    # Tab 4: Calibration
+    tf_gain = ft.Ref[ft.TextField]()
+    tf_offset = ft.Ref[ft.TextField]()
+    
+    def save_calibration(e):
+        # In a real app, you would save this to a file or DB
+        page.snack_bar = ft.SnackBar(ft.Text("Coeficientes aplicados temporalmente"), open=True)
+        page.update()
+
+    tab_calibration = ft.Container(
+        padding=20,
+        content=ft.Column([
+            ft.Text("Ajuste de Calibración (Regresión Lineal)", size=24, weight=ft.FontWeight.BOLD),
+            ft.Text("Fórmula:  Temp_Final = (Temp_Recibida * Ganancia) + Offset", italic=True),
+            ft.Divider(),
+            ft.TextField(ref=tf_gain, label="Ganancia (m)", value="1.0", width=200, keyboard_type=ft.KeyboardType.NUMBER),
+            ft.TextField(ref=tf_offset, label="Offset (b)", value="0.0", width=200, keyboard_type=ft.KeyboardType.NUMBER),
+            ft.ElevatedButton("Aplicar Cambios", on_click=save_calibration),
+            ft.Divider(),
+            ft.Text("Nota: Ajuste estos valores si la temperatura mostrada no coincide con la real.", size=12, color=ft.Colors.GREY),
+        ])
+    )
+
     t = ft.Tabs(
         selected_index=0,
         animation_duration=300,
@@ -487,6 +535,7 @@ def main(page: ft.Page):
             ft.Tab(text="Registro", content=tab_register),
             ft.Tab(text="Historial", content=tab_history),
             ft.Tab(text="Dashboard", content=tab_dashboard),
+            ft.Tab(text="Calibración", content=tab_calibration),
         ],
         expand=1,
     )
@@ -514,12 +563,28 @@ def get_local_ip():
         return "127.0.0.1"
 
 if __name__ == "__main__":
+    import uvicorn
+    import flet.fastapi as flet_fastapi
+    
     local_ip = get_local_ip()
     port = 8550
-    print(f"--------------------------------------------------")
-    print(f"¡APLICACIÓN WEB ACTIVA!")
-    print(f"Desde tu PC:      http://localhost:{port}")
-    print(f"Desde tu CELULAR: http://{local_ip}:{port}")
-    print(f"--------------------------------------------------")
     
-    ft.app(target=main, view=ft.AppView.WEB_BROWSER, port=port, host="0.0.0.0")
+    # 1. Create FastAPI App
+    app = flet_fastapi.app(main)
+
+    print(f"--------------------------------------------------")
+    print(f"¡SERVIDOR HTTPS ACTIVO! (Necesario para Cámara)")
+    print(f"Desde tu PC:      https://localhost:{port}")
+    print(f"Desde tu CELULAR: https://{local_ip}:{port}")
+    print(f"--------------------------------------------------")
+    print(f"NOTA: Acepta la advertencia de seguridad en el navegador.")
+    print(f"--------------------------------------------------")
+
+    # 2. Run with SSL (HTTPS)
+    uvicorn.run(
+        app, 
+        host="0.0.0.0", 
+        port=port, 
+        ssl_keyfile="key.pem", 
+        ssl_certfile="cert.pem"
+    )

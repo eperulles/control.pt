@@ -1,9 +1,36 @@
-# Ignore everything
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+.venv/
+env/
+venv/
+ENV/
+
+# Streamlit
+.streamlit/
+
+# Database
+scans.db
+
+# Secrets
+ProductoTerminado.json
+*.json
+!usuarios.json
+
+# Executables and builds
+*.exe
+*.spec
+dist/
+build/
+
+# Ignore everything else in this multi-app folder to keep the repo clean
+# But allow pt.py and its assets
 *
-# Unignore specific directories and files
-!*/
-!temperature_logger/
-!temperature_logger/**
+!pt.py
+!Logo.png
+!Logo.ico
+!requirements.txt
+!.gitignore
 !.github/
 !.github/**
-!.gitignore

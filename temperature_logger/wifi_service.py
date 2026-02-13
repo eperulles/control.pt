@@ -126,9 +126,22 @@ class WifiService:
         return None
 
     def _parse_line(self, line):
-        # Format: Raw: 26.50 °C	Corr: 26.30 °C	CJ: 27.00 °C	Fault: 0
-        # Regex to extract Corr
+        # Format 1 (Old): Raw: 26.50 °C	Corr: 26.30 °C	CJ: 27.00 °C	Fault: 0
+        # Format 2 (New): 26.30
+        
         if not line: return
+        
+        # Try simple float first (New format)
+        try:
+            temp = float(line.strip())
+            self.latest_temp = temp
+            if self.collecting:
+                self.collected_temps.append(temp)
+            return
+        except ValueError:
+            pass
+            
+        # Try Regex (Old format)
         match = re.search(r"Corr:\s*([0-9\.]+)", line)
         if match:
             try:
