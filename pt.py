@@ -18,23 +18,30 @@ CREDENTIALS_FILE = "ProductoTerminado.json"
 # Cache extremo para máxima velocidad
 @st.cache_resource
 def get_google_client():
-    # Intento 1: Usar st.secrets (Recomendado para Streamlit Cloud)
-    if "gcp_service_account" in st.secrets:
+    # Intento 1: Usar archivo local (Prioridad en local para evitar errores de JWT)
+    if os.path.exists(CREDENTIALS_FILE):
         try:
-            creds_dict = dict(st.secrets["gcp_service_account"])
-            creds = Credentials.from_service_account_info(creds_dict, scopes=SCOPE)
+            creds = Credentials.from_service_account_file(CREDENTIALS_FILE, scopes=SCOPE)
             client = gspread.authorize(creds)
             return client
         except Exception as e:
-            st.error(f"❌ Error cargando credenciales desde secrets: {e}")
+            st.error(f"❌ Error cargando archivo local {CREDENTIALS_FILE}: {e}")
     
-    # Intento 2: Usar archivo local (Para desarrollo local)
-    if os.path.exists(CREDENTIALS_FILE):
-        creds = Credentials.from_service_account_file(CREDENTIALS_FILE, scopes=SCOPE)
-        client = gspread.authorize(creds)
-        return client
+    # Intento 2: Usar st.secrets (Para Streamlit Cloud)
+    try:
+        if "gcp_service_account" in st.secrets:
+            creds_dict = dict(st.secrets["gcp_service_account"])
+            # Asegurar que los saltos de línea se procesen correctamente
+            if "private_key" in creds_dict:
+                creds_dict["private_key"] = creds_dict["private_key"].replace("\\n", "\n")
+            
+            creds = Credentials.from_service_account_info(creds_dict, scopes=SCOPE)
+            client = gspread.authorize(creds)
+            return client
+    except Exception as e:
+        st.error(f"❌ Error con secrets: {e}")
     
-    st.error(f"❌ No se econtraron credenciales (ni secrets ni archivo {CREDENTIALS_FILE})")
+    st.error(f"❌ No se econtraron credenciales válidas")
     st.stop()
 
 @st.cache_data(ttl=600)
